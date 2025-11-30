@@ -20,7 +20,7 @@ jobs:
       - name: Add PR to DevOps Release Board
         uses: actions/github-script@v8
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const prNodeId = context.payload.pull_request.node_id;
             const prNumber = context.payload.pull_request.number;
@@ -45,12 +45,17 @@ jobs:
               // Log all project names for debugging
               console.log('Available projects:', projects.map(p => `"${p.name}" (ID: ${p.id})`).join(', '));
               
-              // Find the DevOps Release & QC Board project - try multiple name patterns
+              // Find the DevOps Release & QC Board project - try exact match first
+              // Project name from UI: "Dhwani - DevOps Release & QC Board"
               let devopsProject = projects.find(p => {
                 const name = p.name.toLowerCase();
-                return (name.includes('devops') && name.includes('release')) ||
-                       (name.includes('devops') && name.includes('qc')) ||
-                       (name.includes('devops') && name.includes('board'));
+                // Try exact match or close match
+                return name === 'dhwani - devops release & qc board' ||
+                       name === 'dhwani – devops release & qc board' || // Different dash character
+                       (name.includes('dhwani') && name.includes('devops') && name.includes('release') && name.includes('qc')) ||
+                       (name.includes('devops') && name.includes('release') && name.includes('qc')) ||
+                       (name.includes('devops') && name.includes('release')) ||
+                       (name.includes('devops') && name.includes('qc'));
               });
               
               // If not found, try just "devops"
