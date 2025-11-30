@@ -267,47 +267,27 @@ jobs:
             // Only create new comment if it doesn't exist
             const checklist = `## 🔧 DevOps Checklist Template
             
-            **DevOps Team: Copy the template below, fill it out, and post it as a comment on this PR.**
+            👋 **DevOps Team:** Copy the template below, fill it out, and post it as a comment on this PR.
             
             ---
             
-            \`\`\`
+            \`\`\`markdown
             ## 🔧 DevOps Checklist
             
-            ### Workflows & Quality
+            ### ✅ Workflows & Quality
             - [ ] All CI/CD workflows passing
             - [ ] Code quality checks passed
             - [ ] Security scans passed
             - [ ] No secrets or credentials exposed
             
-            ### Review & Testing
-            - [ ] Code review approved
-            - [ ] Tested on staging/UAT
-            - [ ] No critical bugs pending
-            
-            ### Documentation
+            ### 📝 Documentation
             - [ ] Deployment notes reviewed
-            - [ ] Rollback plan documented
             - [ ] 🔗 [Rollback Guidelines](https://devops.dhwaniris.com/rollback-guidelines)
-            
-            ### Deployment Readiness
-            - [ ] DB migrations ready (if applicable)
-            - [ ] Config changes documented
-            - [ ] Monitoring alerts validated
-            
-            ### Final Decision
-            - [ ] **GO** - Ready for production
-            - [ ] **NO-GO** - Blocked (see notes)
-            
-            **Notes:**
-            <!-- Add blockers or additional notes here -->
-            
-            **Reviewed by:** @username
-            **Date:** YYYY-MM-DD
             \`\`\`
             
             ---
-            *Copy the template above, fill it out with your review, and post it as a comment.*`;
+            
+            💡 **Instructions:** Copy the template above, check the boxes (replace \`[ ]\` with \`[x]\`), and post it as a comment.`;
             
             // Create new comment
             await github.rest.issues.createComment({
