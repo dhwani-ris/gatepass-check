@@ -4,7 +4,8 @@ on:
   issue_comment:
     types: [created, edited]
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, closed]
+    branches: [master]
 
 permissions:
   contents: write

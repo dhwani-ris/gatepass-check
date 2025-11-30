@@ -1,0 +1,22 @@
+name: Add PR to DevOps Board
+
+on:
+  pull_request:
+    types: [opened, reopened]
+    branches: [master]
+  push:
+    branches: [master]
+
+jobs:
+  add_to_project:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Add PR to DevOps Release Board
+        uses: actions/add-to-project@v0.5.0
+        with:
+          project-url: https://github.com/orgs/dhwani-ris/projects/##
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
