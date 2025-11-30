@@ -271,15 +271,15 @@ jobs:
             
             ---
             
-            ### ✅ Workflows & Quality
-            - [ ] All CI/CD workflows passing
-            - [ ] Code quality checks passed
-            - [ ] Security scans passed
-            - [ ] No secrets or credentials exposed
+            ### ✅ Pre-Merge Verification
+            - [ ] All CI/CD workflows passing (check Actions tab)
+            - [ ] Code quality checks passed (Semgrep, Pre-commit)
+            - [ ] Security scans passed (no vulnerabilities)
+            - [ ] No secrets or credentials exposed (manual review)
             
             ### 📝 Documentation
-            - [ ] Deployment notes reviewed
-            - [ ] 🔗 [Rollback Guidelines](https://devops.dhwaniris.com/rollback-guidelines)
+            - [ ] Deployment notes reviewed (see comment above)
+            - [ ] 🔗 [Rollback Guidelines](https://dhwaniris1-my.sharepoint.com/:b:/g/personal/technology_dhwaniris_com/IQBZ-x3H8jIjQoliD_JEKHfSAQq2pMXdy8wFAdISg7fInTE?e=gd7dsq) reviewed
             
             ---
             
