@@ -18,23 +18,12 @@ jobs:
       organization-projects: write
     steps:
       - name: Add PR to DevOps Release Board
-        uses: actions/add-to-project@v0.5.0
-        with:
-          project-url: https://github.com/orgs/dhwani-ris/projects/##
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          content-id: ${{ github.event.pull_request.node_id }}
-          content-type: PullRequest
-        continue-on-error: true
-      
-      - name: Alternative - Add PR using GitHub API
-        if: failure()
         uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            // Alternative method using GitHub API
             const prNodeId = context.payload.pull_request.node_id;
-            const projectNumber = '##'; // Replace with actual project number
+            const prNumber = context.payload.pull_request.number;
             
             try {
               // Get organization projects
@@ -43,17 +32,21 @@ jobs:
                 state: 'open'
               });
               
+              console.log(`Found ${projects.length} organization projects`);
+              
               // Find the DevOps Release & QC Board project
               const devopsProject = projects.find(p => 
-                p.name.includes('DevOps') || 
-                p.name.includes('Release') || 
-                p.name.includes('QC')
+                p.name.toLowerCase().includes('devops') && 
+                (p.name.toLowerCase().includes('release') || p.name.toLowerCase().includes('qc'))
               );
               
               if (!devopsProject) {
-                console.log('DevOps project not found');
+                console.log('DevOps Release & QC Board project not found');
+                console.log('Available projects:', projects.map(p => p.name).join(', '));
                 return;
               }
+              
+              console.log(`Found project: ${devopsProject.name} (ID: ${devopsProject.id})`);
               
               // Get project columns
               const { data: columns } = await github.rest.projects.listColumns({
@@ -65,6 +58,8 @@ jobs:
                 return;
               }
               
+              console.log(`Found ${columns.length} columns:`, columns.map(c => c.name).join(', '));
+              
               // Add PR to the first column (usually "To do" or "In progress")
               const firstColumn = columns[0];
               
@@ -74,9 +69,17 @@ jobs:
                 content_type: 'PullRequest'
               });
               
-              console.log(`✅ Added PR #${context.payload.pull_request.number} to DevOps board`);
+              console.log(`✅ Successfully added PR #${prNumber} to DevOps Release & QC Board`);
+              console.log(`   Project: ${devopsProject.name}`);
+              console.log(`   Column: ${firstColumn.name}`);
             } catch (error) {
-              console.log('Error adding to project:', error.message);
-              console.log('Note: Make sure GITHUB_TOKEN has organization project permissions or use a PAT');
+              console.log('❌ Error adding PR to project:', error.message);
+              if (error.status === 403) {
+                console.log('⚠️ Permission denied. GITHUB_TOKEN may not have organization project access.');
+                console.log('   Consider using a Personal Access Token (PAT) with project scope.');
+              } else if (error.status === 404) {
+                console.log('⚠️ Project or column not found. Check project name and permissions.');
+              }
+              throw error;
             }
 
