@@ -253,6 +253,11 @@ jobs:
             );
             
             if (existingComment) {
+              // Check if already submitted
+              if (existingComment.body.includes('✅ **CHECKLIST SUBMITTED**')) {
+                console.log('Checklist already submitted and locked, cannot update');
+                return;
+              }
               // Don't update existing comment to preserve checkbox states
               console.log('DevOps Checklist comment already exists, preserving user checkboxes');
               return;
@@ -263,31 +268,76 @@ jobs:
             
             **Please review all workflows and checks before merging:**
             
-            ### Workflow Status Review
-            - [ ] All CI/CD workflows are passing
-            - [ ] Quality Checks workflow passed
-            - [ ] Security Scan workflow passed
-            - [ ] Code quality checks passed
-            - [ ] Test coverage meets requirements
+            ### 1. Workflow Status Review
+            - [ ] DevOps Checklist Reminder
+            - [ ] Documentation Required
+            - [ ] Semantic Commits
+            - [ ] GitHub Actions Security (send-secrets)
+            - [ ] Quality Checks / Pre-Commit
+            - [ ] Quality Checks / Semgrep Rules
+            - [ ] All other workflows passing
             
-            ### Review Status
-            - [ ] All required reviewers have approved
-            - [ ] Code review completed
-            - [ ] Security review completed (if applicable)
+            ### 2. Code Review & Approval
+            - [ ] Team Lead has approved the PR
+            - [ ] All reviewer comments resolved
+            - [ ] No leftover debug logs, temp files, zip files, or accidental commits
+            - [ ] No exposed secrets or credentials
+            - [ ] Commit messages follow semantic standards
             
-            ### Pre-Merge Verification
-            - [ ] Deployment Notes document reviewed (see Deployment Notes comment above)
-            - [ ] All commits reviewed
-            - [ ] Breaking changes identified (if any)
-            - [ ] Version number verified (if applicable)
+            ### 3. Documentation & Release Notes
+            - [ ] Deployment Notes reviewed
+            - [ ] Change summary provided
+            - [ ] Impacted modules/services listed
+            - [ ] Config or environment changes documented
+            - [ ] Rollback Plan attached
+            - [ ] 🔗 Rollback Reference: https://devops.dhwaniris.com/rollback-guidelines
             
-            ### Final Checks
-            - [ ] No blocking issues or errors
-            - [ ] Ready for production deployment
-            - [ ] Rollback plan understood (if high-risk)
+            ### 4. Functional & QA Validation
+            - [ ] Changes tested on staging/UAT
+            - [ ] QA sign-off received
+            - [ ] No high/critical bugs pending
+            - [ ] Regression testing completed
+            - [ ] API responses verified (if applicable)
+            
+            ### 5. Security & Compliance
+            - [ ] Semgrep Rules passed (mandatory)
+            - [ ] No new security warnings introduced
+            - [ ] Sensitive logic reviewed
+            - [ ] No secrets in PR (manual confirmation)
+            
+            ### 6. Deployment Verification
+            - [ ] Deployment strategy identified (Blue/Green / Rolling / Manual)
+            - [ ] Downtime estimate validated (if applicable)
+            - [ ] Backup/restore plan ready
+            - [ ] Monitoring alerts configured or validated
+            - [ ] Pre-deployment checks completed (DB migrations, queues, cron, cache, etc.)
+            
+            ### 7. Merge Validation
+            - [ ] PR raised from development → master (correct flow)
+            - [ ] Branch updated with latest master (no conflicts)
+            - [ ] All merge blockers cleared
+            - [ ] No pending tasks or approvals
+            
+            ### 8. Final DevOps Decision
+            - [ ] **GO** → Safe to merge into production
+            - [ ] **NO-GO** → Blocked; failures listed below:
+            
+            **Notes:**
+            \`\`\`
+            <!-- Add any additional notes or blockers here -->
+            \`\`\`
             
             ---
-            **Note:** This checklist is for DevOps team to verify all workflows and checks before merging.`;
+            
+            ### 📤 Submit Checklist
+            
+            **To submit this checklist (cannot be reverted once submitted):**
+            
+            Comment: \`/submit-checklist\`
+            
+            ⚠️ **Warning:** Once submitted, this checklist will be locked and cannot be modified.
+            
+            **Status:** ⏳ *Pending Submission*`;
             
             // Create new comment
             await github.rest.issues.createComment({

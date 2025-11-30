@@ -1,0 +1,124 @@
+name: DevOps Checklist Submission
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  submit-checklist:
+    runs-on: ubuntu-latest
+    if: |
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/submit-checklist')
+    steps:
+      - name: Get PR number
+        id: get-pr
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = context.payload.issue.number;
+            core.setOutput('pr_number', prNumber);
+            return prNumber;
+      
+      - name: Submit and lock checklist
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = context.payload.issue.number;
+            const submitter = context.payload.comment.user.login;
+            const submitTime = new Date().toISOString();
+            const submitDate = new Date().toLocaleString('en-US', { 
+              timeZone: 'UTC',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+              timeZoneName: 'short'
+            });
+            
+            // Get all comments to find the checklist
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            
+            const checklistComment = comments.data.find(
+              comment => comment.user.type === 'Bot' && 
+              comment.body.includes('DevOps Checklist - Workflow Review')
+            );
+            
+            if (!checklistComment) {
+              console.log('Checklist comment not found');
+              return;
+            }
+            
+            // Check if already submitted
+            if (checklistComment.body.includes('✅ **CHECKLIST SUBMITTED**')) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: `⚠️ This checklist has already been submitted and cannot be modified.`
+              });
+              return;
+            }
+            
+            // Extract the current checklist content (preserve checkboxes)
+            let checklistBody = checklistComment.body;
+            
+            // Replace the submission section with submitted status
+            const submittedSection = `---
+            
+            ### ✅ **CHECKLIST SUBMITTED**
+            
+            **Submitted by:** @${submitter}
+            **Submitted at:** ${submitDate} (UTC)
+            
+            🔒 **This checklist is now locked and cannot be modified.**
+            
+            ---
+            **Note:** This checklist was submitted and is final. No further changes can be made.`;
+            
+            // Find and replace the submission section
+            // Look for the "Submit Checklist" section and replace everything from there to the end
+            const submitSectionStart = checklistBody.indexOf('### 📤 Submit Checklist');
+            if (submitSectionStart !== -1) {
+              // Keep everything before the submission section, then add the submitted section
+              checklistBody = checklistBody.substring(0, submitSectionStart) + submittedSection;
+            } else {
+              // If section not found, append the submitted section
+              checklistBody = checklistBody + '\n\n' + submittedSection;
+            }
+            
+            // Update the checklist comment to show it's submitted
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: checklistComment.id,
+              body: checklistBody
+            });
+            
+            // Add a confirmation comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: `✅ **Checklist submitted successfully!**
+              
+              The DevOps Checklist has been locked and cannot be modified.
+              
+              **Submitted by:** @${submitter}
+              **Time:** ${submitDate} (UTC)`
+            });
+            
+            console.log(`Checklist submitted by ${submitter} at ${submitTime}`);
+
