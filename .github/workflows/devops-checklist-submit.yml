@@ -2,7 +2,9 @@ name: DevOps Checklist Submission
 
 on:
   issue_comment:
-    types: [created]
+    types: [created, edited]
+  pull_request:
+    types: [synchronize, reopened, ready_for_review, closed]
 
 permissions:
   pull-requests: write
@@ -12,8 +14,8 @@ jobs:
   submit-checklist:
     runs-on: ubuntu-latest
     if: |
-      github.event.issue.pull_request &&
-      contains(github.event.comment.body, '/submit-checklist')
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '/submit-checklist')) ||
+      (github.event_name == 'pull_request' && (github.event.action == 'synchronize' || github.event.action == 'reopened' || github.event.action == 'ready_for_review' || github.event.action == 'closed'))
     steps:
       - name: Get PR number
         id: get-pr
@@ -26,6 +28,7 @@ jobs:
             return prNumber;
       
       - name: Submit and lock checklist
+        if: github.event_name == 'issue_comment' && contains(github.event.comment.body, '/submit-checklist')
         uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -75,15 +78,20 @@ jobs:
             // Extract the current checklist content (preserve checkboxes)
             let checklistBody = checklistComment.body;
             
+            // Extract submission info to preserve it
+            const submissionInfo = `**Submitted by:** @${submitter}
+            **Submitted at:** ${submitDate} (UTC)`;
+            
             // Replace the submission section with submitted status
             const submittedSection = `---
             
             ### ✅ **CHECKLIST SUBMITTED**
             
-            **Submitted by:** @${submitter}
-            **Submitted at:** ${submitDate} (UTC)
+            ${submissionInfo}
             
             🔒 **This checklist is now locked and cannot be modified.**
+            
+            <!-- CHECKLIST_SUBMITTED_LOCK -->
             
             ---
             **Note:** This checklist was submitted and is final. No further changes can be made.`;
@@ -121,4 +129,112 @@ jobs:
             });
             
             console.log(`Checklist submitted by ${submitter} at ${submitTime}`);
+      
+      - name: Re-lock checklist if edited after submission
+        if: |
+          (github.event_name == 'issue_comment' && github.event.action == 'edited') ||
+          (github.event_name == 'pull_request')
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = github.event_name == 'issue_comment' 
+              ? context.payload.issue.number 
+              : context.payload.pull_request.number;
+            
+            // Get all comments to find the checklist
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            
+            const checklistComment = comments.data.find(
+              comment => comment.user.type === 'Bot' && 
+              comment.body.includes('DevOps Checklist - Workflow Review')
+            );
+            
+            if (!checklistComment) {
+              return;
+            }
+            
+            // Check if checklist was previously submitted (look for submission marker)
+            const hasSubmissionMarker = checklistComment.body.includes('CHECKLIST_SUBMITTED_LOCK');
+            const hasSubmittedText = checklistComment.body.includes('✅ **CHECKLIST SUBMITTED**');
+            
+            // If it was submitted, ensure it's locked
+            if (hasSubmissionMarker || hasSubmittedText) {
+              let checklistBody = checklistComment.body;
+              
+              // Extract submission info
+              const submitterMatch = checklistBody.match(/\*\*Submitted by:\*\* @(\S+)/);
+              const dateMatch = checklistBody.match(/\*\*Submitted at:\*\* (.+?)(?:\n|UTC)/);
+              const submitter = submitterMatch ? submitterMatch[1] : 'System';
+              const submitDate = dateMatch ? dateMatch[1].trim() : new Date().toLocaleString('en-US', { 
+                timeZone: 'UTC',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                timeZoneName: 'short'
+              });
+              
+              // Check if lock section is present and complete
+              const hasLockMessage = checklistBody.includes('🔒 **This checklist is now locked and cannot be modified.**');
+              const hasCompleteLock = hasSubmittedText && hasLockMessage;
+              
+              // If lock is missing or incomplete, restore it
+              if (!hasCompleteLock) {
+                // Find where to insert/update the lock section
+                const submitIndex = checklistBody.indexOf('### ✅ **CHECKLIST SUBMITTED**');
+                const lockSection = `---
+                
+                ### ✅ **CHECKLIST SUBMITTED**
+                
+                **Submitted by:** @${submitter}
+                **Submitted at:** ${submitDate} (UTC)
+                
+                🔒 **This checklist is now locked and cannot be modified.**
+                
+                <!-- CHECKLIST_SUBMITTED_LOCK -->
+                
+                ---
+                **Note:** This checklist was submitted and is final. No further changes can be made.`;
+                
+                if (submitIndex !== -1) {
+                  // Replace from submission header to end of comment
+                  const beforeSubmit = checklistBody.substring(0, submitIndex);
+                  checklistBody = beforeSubmit + lockSection;
+                } else {
+                  // Append lock section if submission header is missing
+                  checklistBody = checklistBody + '\n\n' + lockSection;
+                }
+                
+                // Re-lock the checklist
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: checklistComment.id,
+                  body: checklistBody
+                });
+                
+                // Add a warning comment only if this is an edit event (not PR sync)
+                if (github.event_name == 'issue_comment' && github.event.action == 'edited') {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: prNumber,
+                    body: `⚠️ **Checklist Re-locked**
+                    
+                    The DevOps Checklist was modified after submission. It has been automatically re-locked.
+                    
+                    🔒 **This checklist cannot be modified once submitted.**`
+                  });
+                }
+                
+                console.log('Checklist re-locked after unauthorized edit');
+              }
+            }
 

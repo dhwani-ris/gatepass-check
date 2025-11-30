@@ -253,8 +253,9 @@ jobs:
             );
             
             if (existingComment) {
-              // Check if already submitted
-              if (existingComment.body.includes('✅ **CHECKLIST SUBMITTED**')) {
+              // Check if already submitted (check both visible marker and hidden marker)
+              if (existingComment.body.includes('✅ **CHECKLIST SUBMITTED**') || 
+                  existingComment.body.includes('CHECKLIST_SUBMITTED_LOCK')) {
                 console.log('Checklist already submitted and locked, cannot update');
                 return;
               }
