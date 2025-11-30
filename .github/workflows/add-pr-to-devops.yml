@@ -3,16 +3,19 @@ name: Add PR to DevOps Board
 on:
   pull_request:
     types: [opened, reopened]
-    branches: [master]
-  push:
-    branches: [master]
+    branches: [main, master]
 
 jobs:
   add_to_project:
     runs-on: ubuntu-latest
+    if: |
+      github.event.pull_request.base.ref == 'main' || 
+      github.event.pull_request.base.ref == 'master'
     permissions:
       contents: read
       pull-requests: write
+      repository-projects: write
+      organization-projects: write
     steps:
       - name: Add PR to DevOps Release Board
         uses: actions/add-to-project@v0.5.0
