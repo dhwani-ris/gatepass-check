@@ -24,6 +24,9 @@ jobs:
           script: |
             const prNodeId = context.payload.pull_request.node_id;
             const prNumber = context.payload.pull_request.number;
+            const prUrl = context.payload.pull_request.html_url;
+            
+            console.log(`Processing PR #${prNumber} (Node ID: ${prNodeId})`);
             
             try {
               // Get organization projects
@@ -34,19 +37,37 @@ jobs:
               
               console.log(`Found ${projects.length} organization projects`);
               
-              // Find the DevOps Release & QC Board project
-              const devopsProject = projects.find(p => 
-                p.name.toLowerCase().includes('devops') && 
-                (p.name.toLowerCase().includes('release') || p.name.toLowerCase().includes('qc'))
-              );
-              
-              if (!devopsProject) {
-                console.log('DevOps Release & QC Board project not found');
-                console.log('Available projects:', projects.map(p => p.name).join(', '));
+              if (projects.length === 0) {
+                console.log('⚠️ No organization projects found. Check permissions.');
                 return;
               }
               
-              console.log(`Found project: ${devopsProject.name} (ID: ${devopsProject.id})`);
+              // Log all project names for debugging
+              console.log('Available projects:', projects.map(p => `"${p.name}" (ID: ${p.id})`).join(', '));
+              
+              // Find the DevOps Release & QC Board project - try multiple name patterns
+              let devopsProject = projects.find(p => {
+                const name = p.name.toLowerCase();
+                return (name.includes('devops') && name.includes('release')) ||
+                       (name.includes('devops') && name.includes('qc')) ||
+                       (name.includes('devops') && name.includes('board'));
+              });
+              
+              // If not found, try just "devops"
+              if (!devopsProject) {
+                devopsProject = projects.find(p => 
+                  p.name.toLowerCase().includes('devops')
+                );
+              }
+              
+              if (!devopsProject) {
+                console.log('❌ DevOps Release & QC Board project not found');
+                console.log('Available project names:', projects.map(p => p.name).join(', '));
+                console.log('Please check the project name matches: "DevOps", "Release", or "QC"');
+                return;
+              }
+              
+              console.log(`✅ Found project: "${devopsProject.name}" (ID: ${devopsProject.id})`);
               
               // Get project columns
               const { data: columns } = await github.rest.projects.listColumns({
@@ -54,15 +75,31 @@ jobs:
               });
               
               if (columns.length === 0) {
-                console.log('No columns found in project');
+                console.log('❌ No columns found in project');
                 return;
               }
               
-              console.log(`Found ${columns.length} columns:`, columns.map(c => c.name).join(', '));
+              console.log(`Found ${columns.length} columns:`, columns.map(c => `"${c.name}"`).join(', '));
               
-              // Add PR to the first column (usually "To do" or "In progress")
+              // Find the first column (usually "To do", "In progress", or "Backlog")
               const firstColumn = columns[0];
+              console.log(`Adding PR to column: "${firstColumn.name}"`);
               
+              // Check if PR is already in the project
+              const { data: cards } = await github.rest.projects.listCards({
+                column_id: firstColumn.id
+              });
+              
+              const alreadyAdded = cards.some(card => 
+                card.content_url && card.content_url.includes(`/pulls/${prNumber}`)
+              );
+              
+              if (alreadyAdded) {
+                console.log(`✅ PR #${prNumber} is already in the project`);
+                return;
+              }
+              
+              // Add PR to the first column
               await github.rest.projects.createCard({
                 column_id: firstColumn.id,
                 content_id: prNodeId,
@@ -70,16 +107,26 @@ jobs:
               });
               
               console.log(`✅ Successfully added PR #${prNumber} to DevOps Release & QC Board`);
-              console.log(`   Project: ${devopsProject.name}`);
-              console.log(`   Column: ${firstColumn.name}`);
+              console.log(`   Project: "${devopsProject.name}"`);
+              console.log(`   Column: "${firstColumn.name}"`);
+              console.log(`   PR URL: ${prUrl}`);
             } catch (error) {
               console.log('❌ Error adding PR to project:', error.message);
+              console.log('Error details:', JSON.stringify(error, null, 2));
+              
               if (error.status === 403) {
-                console.log('⚠️ Permission denied. GITHUB_TOKEN may not have organization project access.');
-                console.log('   Consider using a Personal Access Token (PAT) with project scope.');
+                console.log('⚠️ Permission denied (403). GITHUB_TOKEN may not have organization project access.');
+                console.log('   Solution: Use a Personal Access Token (PAT) with "project" scope.');
+                console.log('   1. Create PAT at: https://github.com/settings/tokens');
+                console.log('   2. Add it as secret: PROJECT_TOKEN');
+                console.log('   3. Update workflow to use: ${{ secrets.PROJECT_TOKEN }}');
               } else if (error.status === 404) {
-                console.log('⚠️ Project or column not found. Check project name and permissions.');
+                console.log('⚠️ Not found (404). Check project name and permissions.');
+              } else if (error.status === 401) {
+                console.log('⚠️ Unauthorized (401). Token may be invalid or expired.');
               }
-              throw error;
+              
+              // Don't fail the workflow, just log the error
+              console.log('⚠️ Continuing workflow despite error...');
             }
 
