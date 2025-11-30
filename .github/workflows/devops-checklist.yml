@@ -265,7 +265,14 @@ jobs:
             }
             
             // Only create new comment if it doesn't exist
-            const checklist = `## 🔧 DevOps Checklist
+            const checklist = `## 🔧 DevOps Checklist Template
+            
+            **DevOps Team: Copy the template below, fill it out, and post it as a comment on this PR.**
+            
+            ---
+            
+            \`\`\`
+            ## 🔧 DevOps Checklist
             
             ### Workflows & Quality
             - [ ] All CI/CD workflows passing
@@ -293,15 +300,14 @@ jobs:
             - [ ] **NO-GO** - Blocked (see notes)
             
             **Notes:**
-            \`\`\`
-            <!-- Add blockers or additional notes -->
+            <!-- Add blockers or additional notes here -->
+            
+            **Reviewed by:** @username
+            **Date:** YYYY-MM-DD
             \`\`\`
             
             ---
-            
-            **Submit:** Comment \`/submit-checklist\` to lock this checklist
-            
-            ⚠️ Once submitted, this checklist cannot be modified.`;
+            *Copy the template above, fill it out with your review, and post it as a comment.*`;
             
             // Create new comment
             await github.rest.issues.createComment({
