@@ -137,22 +137,22 @@ jobs:
             const fixes = commits.filter(c => c.message.startsWith('fix')).map(c => c.message.replace(/^fix(\(.+?\))?:\s*/i, ''));
             const other = commits.filter(c => !c.message.startsWith('feat') && !c.message.startsWith('fix') && !c.message.startsWith('chore') && !c.message.startsWith('ci'));
             
-            // Build feature details
+            // Build feature details (without numbering - will be added in formatFeatureDetails)
             let featureDetails = [];
             if (features.length > 0) {
-              featureDetails.push(...features.map(f => `1) ${f}`));
+              featureDetails.push(...features);
             }
             if (fixes.length > 0) {
-              featureDetails.push(...fixes.map(f => `2) ${f}`));
+              featureDetails.push(...fixes);
             }
             if (other.length > 0) {
-              featureDetails.push(...other.slice(0, 5).map((o, i) => `${i + 3}) ${o.message}`));
+              featureDetails.push(...other.slice(0, 5).map(o => o.message));
             }
             
             const today = new Date().toISOString().split('T')[0];
             const releaseDate = today.split('-').reverse().join('-'); // Format: DD-MM-YYYY
             
-            // Format feature details better
+            // Format feature details with sequential numbering
             const formatFeatureDetails = (details) => {
               if (details.length === 0) return 'See commits above';
               return details.map((f, i) => `${i + 1}) ${f}`).join('<br>');
@@ -265,80 +265,43 @@ jobs:
             }
             
             // Only create new comment if it doesn't exist
-            const checklist = `## 🔧 DevOps Checklist - Workflow Review
+            const checklist = `## 🔧 DevOps Checklist
             
-            **Please review all workflows and checks before merging:**
+            ### Workflows & Quality
+            - [ ] All CI/CD workflows passing
+            - [ ] Code quality checks passed
+            - [ ] Security scans passed
+            - [ ] No secrets or credentials exposed
             
-            ### 1. Workflow Status Review
-            - [ ] DevOps Checklist Reminder
-            - [ ] Documentation Required
-            - [ ] Semantic Commits
-            - [ ] GitHub Actions Security (send-secrets)
-            - [ ] Quality Checks / Pre-Commit
-            - [ ] Quality Checks / Semgrep Rules
-            - [ ] All other workflows passing
+            ### Review & Testing
+            - [ ] Code review approved
+            - [ ] Tested on staging/UAT
+            - [ ] No critical bugs pending
             
-            ### 2. Code Review & Approval
-            - [ ] Team Lead has approved the PR
-            - [ ] All reviewer comments resolved
-            - [ ] No leftover debug logs, temp files, zip files, or accidental commits
-            - [ ] No exposed secrets or credentials
-            - [ ] Commit messages follow semantic standards
+            ### Documentation
+            - [ ] Deployment notes reviewed
+            - [ ] Rollback plan documented
+            - [ ] 🔗 [Rollback Guidelines](https://devops.dhwaniris.com/rollback-guidelines)
             
-            ### 3. Documentation & Release Notes
-            - [ ] Deployment Notes reviewed
-            - [ ] Change summary provided
-            - [ ] Impacted modules/services listed
-            - [ ] Config or environment changes documented
-            - [ ] Rollback Plan attached
-            - [ ] 🔗 Rollback Reference: https://devops.dhwaniris.com/rollback-guidelines
+            ### Deployment Readiness
+            - [ ] DB migrations ready (if applicable)
+            - [ ] Config changes documented
+            - [ ] Monitoring alerts validated
             
-            ### 4. Functional & QA Validation
-            - [ ] Changes tested on staging/UAT
-            - [ ] QA sign-off received
-            - [ ] No high/critical bugs pending
-            - [ ] Regression testing completed
-            - [ ] API responses verified (if applicable)
-            
-            ### 5. Security & Compliance
-            - [ ] Semgrep Rules passed (mandatory)
-            - [ ] No new security warnings introduced
-            - [ ] Sensitive logic reviewed
-            - [ ] No secrets in PR (manual confirmation)
-            
-            ### 6. Deployment Verification
-            - [ ] Deployment strategy identified (Blue/Green / Rolling / Manual)
-            - [ ] Downtime estimate validated (if applicable)
-            - [ ] Backup/restore plan ready
-            - [ ] Monitoring alerts configured or validated
-            - [ ] Pre-deployment checks completed (DB migrations, queues, cron, cache, etc.)
-            
-            ### 7. Merge Validation
-            - [ ] PR raised from development → master (correct flow)
-            - [ ] Branch updated with latest master (no conflicts)
-            - [ ] All merge blockers cleared
-            - [ ] No pending tasks or approvals
-            
-            ### 8. Final DevOps Decision
-            - [ ] **GO** → Safe to merge into production
-            - [ ] **NO-GO** → Blocked; failures listed below:
+            ### Final Decision
+            - [ ] **GO** - Ready for production
+            - [ ] **NO-GO** - Blocked (see notes)
             
             **Notes:**
             \`\`\`
-            <!-- Add any additional notes or blockers here -->
+            <!-- Add blockers or additional notes -->
             \`\`\`
             
             ---
             
-            ### 📤 Submit Checklist
+            **Submit:** Comment \`/submit-checklist\` to lock this checklist
             
-            **To submit this checklist (cannot be reverted once submitted):**
-            
-            Comment: \`/submit-checklist\`
-            
-            ⚠️ **Warning:** Once submitted, this checklist will be locked and cannot be modified.
-            
-            **Status:** ⏳ *Pending Submission*`;
+            ⚠️ Once submitted, this checklist cannot be modified.`;
             
             // Create new comment
             await github.rest.issues.createComment({

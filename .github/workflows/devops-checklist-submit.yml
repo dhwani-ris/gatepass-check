@@ -107,6 +107,20 @@ jobs:
               checklistBody = checklistBody + '\n\n' + submittedSection;
             }
             
+            // Extract and store the exact checkbox states before locking
+            const checkboxStates = [];
+            const checkboxRegex = /- \[([ x])\] (.+)/g;
+            let match;
+            while ((match = checkboxRegex.exec(checklistBody)) !== null) {
+              checkboxStates.push({
+                checked: match[1] === 'x',
+                text: match[2]
+              });
+            }
+            
+            // Store checkbox states in a hidden comment for restoration
+            const checkboxStatesJson = JSON.stringify(checkboxStates);
+            
             // Update the checklist comment to show it's submitted
             await github.rest.issues.updateComment({
               owner: context.repo.owner,
@@ -114,6 +128,43 @@ jobs:
               comment_id: checklistComment.id,
               body: checklistBody
             });
+            
+            // Add a hidden comment with checkbox states for restoration
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: `<!-- CHECKLIST_STATES:${checkboxStatesJson} -->`
+            });
+            
+            // Add label to track submission
+            try {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: ['devops-checklist-submitted']
+              });
+            } catch (e) {
+              // Label might not exist, create it
+              try {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: 'devops-checklist-submitted',
+                  color: '28a745',
+                  description: 'DevOps Checklist has been submitted and locked'
+                });
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  labels: ['devops-checklist-submitted']
+                });
+              } catch (labelError) {
+                console.log('Could not create/add label:', labelError.message);
+              }
+            }
             
             // Add a confirmation comment
             await github.rest.issues.createComment({
@@ -162,9 +213,26 @@ jobs:
             const hasSubmissionMarker = checklistComment.body.includes('CHECKLIST_SUBMITTED_LOCK');
             const hasSubmittedText = checklistComment.body.includes('✅ **CHECKLIST SUBMITTED**');
             
-            // If it was submitted, ensure it's locked
+            // If it was submitted, ensure it's locked and restore checkbox states
             if (hasSubmissionMarker || hasSubmittedText) {
               let checklistBody = checklistComment.body;
+              
+              // Get stored checkbox states from hidden comment
+              let storedStates = null;
+              const allComments = comments.data;
+              for (const comment of allComments) {
+                if (comment.body.includes('CHECKLIST_STATES:')) {
+                  const statesMatch = comment.body.match(/CHECKLIST_STATES:(.+)/);
+                  if (statesMatch) {
+                    try {
+                      storedStates = JSON.parse(statesMatch[1]);
+                      break;
+                    } catch (e) {
+                      console.log('Could not parse stored states');
+                    }
+                  }
+                }
+              }
               
               // Extract submission info
               const submitterMatch = checklistBody.match(/\*\*Submitted by:\*\* @(\S+)/);
@@ -181,12 +249,31 @@ jobs:
                 timeZoneName: 'short'
               });
               
+              // Restore checkbox states if we have stored states
+              if (storedStates && storedStates.length > 0) {
+                let restoredBody = checklistBody;
+                const checkboxRegex = /- \[([ x])\] (.+)/g;
+                let stateIndex = 0;
+                
+                restoredBody = restoredBody.replace(checkboxRegex, (match, checked, text) => {
+                  if (stateIndex < storedStates.length) {
+                    const state = storedStates[stateIndex];
+                    stateIndex++;
+                    // Restore the original checkbox state
+                    return `- [${state.checked ? 'x' : ' '}] ${state.text}`;
+                  }
+                  return match;
+                });
+                
+                checklistBody = restoredBody;
+              }
+              
               // Check if lock section is present and complete
               const hasLockMessage = checklistBody.includes('🔒 **This checklist is now locked and cannot be modified.**');
               const hasCompleteLock = hasSubmittedText && hasLockMessage;
               
-              // If lock is missing or incomplete, restore it
-              if (!hasCompleteLock) {
+              // If lock is missing or incomplete, or checkboxes were changed, restore it
+              if (!hasCompleteLock || (storedStates && checklistBody !== checklistComment.body)) {
                 // Find where to insert/update the lock section
                 const submitIndex = checklistBody.indexOf('### ✅ **CHECKLIST SUBMITTED**');
                 const lockSection = `---
@@ -212,7 +299,7 @@ jobs:
                   checklistBody = checklistBody + '\n\n' + lockSection;
                 }
                 
-                // Re-lock the checklist
+                // Re-lock the checklist with restored states
                 await github.rest.issues.updateComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -228,7 +315,7 @@ jobs:
                     issue_number: prNumber,
                     body: `⚠️ **Checklist Re-locked**
                     
-                    The DevOps Checklist was modified after submission. It has been automatically re-locked.
+                    The DevOps Checklist was modified after submission. It has been automatically re-locked and restored to its submitted state.
                     
                     🔒 **This checklist cannot be modified once submitted.**`
                   });
