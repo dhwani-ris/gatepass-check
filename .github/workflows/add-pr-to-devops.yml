@@ -22,4 +22,61 @@ jobs:
         with:
           project-url: https://github.com/orgs/dhwani-ris/projects/##
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          content-id: ${{ github.event.pull_request.node_id }}
+          content-type: PullRequest
+        continue-on-error: true
+      
+      - name: Alternative - Add PR using GitHub API
+        if: failure()
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Alternative method using GitHub API
+            const prNodeId = context.payload.pull_request.node_id;
+            const projectNumber = '##'; // Replace with actual project number
+            
+            try {
+              // Get organization projects
+              const { data: projects } = await github.rest.projects.listForOrg({
+                org: 'dhwani-ris',
+                state: 'open'
+              });
+              
+              // Find the DevOps Release & QC Board project
+              const devopsProject = projects.find(p => 
+                p.name.includes('DevOps') || 
+                p.name.includes('Release') || 
+                p.name.includes('QC')
+              );
+              
+              if (!devopsProject) {
+                console.log('DevOps project not found');
+                return;
+              }
+              
+              // Get project columns
+              const { data: columns } = await github.rest.projects.listColumns({
+                project_id: devopsProject.id
+              });
+              
+              if (columns.length === 0) {
+                console.log('No columns found in project');
+                return;
+              }
+              
+              // Add PR to the first column (usually "To do" or "In progress")
+              const firstColumn = columns[0];
+              
+              await github.rest.projects.createCard({
+                column_id: firstColumn.id,
+                content_id: prNodeId,
+                content_type: 'PullRequest'
+              });
+              
+              console.log(`✅ Added PR #${context.payload.pull_request.number} to DevOps board`);
+            } catch (error) {
+              console.log('Error adding to project:', error.message);
+              console.log('Note: Make sure GITHUB_TOKEN has organization project permissions or use a PAT');
+            }
 

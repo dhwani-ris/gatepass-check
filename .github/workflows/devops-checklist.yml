@@ -265,14 +265,11 @@ jobs:
             }
             
             // Only create new comment if it doesn't exist
-            const checklist = `## 🔧 DevOps Checklist Template
+            const checklist = `## 🔧 DevOps Checklist
             
-            👋 **DevOps Team:** Copy the template below, fill it out, and post it as a comment on this PR.
+            👋 **DevOps Team:** Please review and check the items below.
             
             ---
-            
-            \`\`\`markdown
-            ## 🔧 DevOps Checklist
             
             ### ✅ Workflows & Quality
             - [ ] All CI/CD workflows passing
@@ -283,11 +280,10 @@ jobs:
             ### 📝 Documentation
             - [ ] Deployment notes reviewed
             - [ ] 🔗 [Rollback Guidelines](https://devops.dhwaniris.com/rollback-guidelines)
-            \`\`\`
             
             ---
             
-            💡 **Instructions:** Copy the template above, check the boxes (replace \`[ ]\` with \`[x]\`), and post it as a comment.`;
+            💡 *Click the checkboxes above to mark items as complete.*`;
             
             // Create new comment
             await github.rest.issues.createComment({
