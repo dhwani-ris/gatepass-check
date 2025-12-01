@@ -30,9 +30,10 @@ jobs:
 
       - name: Cache pip
         uses: actions/cache@v4
+        continue-on-error: true
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/*requirements.txt', '**/pyproject.toml', '**/setup.py') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/*requirements.txt', '**/pyproject.toml', '**/setup.py') || 'no-deps' }}
           restore-keys: |
             ${{ runner.os }}-pip-
             ${{ runner.os }}-
@@ -58,7 +59,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
+          # Cache disabled - no requirements.txt or pyproject.toml found
+          # cache: pip
 
       - name: Install dependencies
         run: |
