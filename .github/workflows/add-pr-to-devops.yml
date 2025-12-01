@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Add PR to DevOps Release Board
         uses: actions/github-script@v8
+        # Note: GITHUB_TOKEN is automatically provided by GitHub Actions
+        # No need to add it as a secret - it's available in all workflows
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
