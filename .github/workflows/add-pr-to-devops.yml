@@ -2,15 +2,17 @@ name: Add PR to DevOps Board
 
 on:
   pull_request:
-    types: [opened, reopened]
-    branches: [main, master]
+    types: [opened, reopened, synchronize]
+    branches: [main, master, develop, development]
 
 jobs:
   add_to_project:
     runs-on: ubuntu-latest
     if: |
       github.event.pull_request.base.ref == 'main' || 
-      github.event.pull_request.base.ref == 'master'
+      github.event.pull_request.base.ref == 'master' ||
+      github.event.pull_request.base.ref == 'develop' ||
+      github.event.pull_request.base.ref == 'development'
     permissions:
       contents: read
       pull-requests: write
@@ -46,14 +48,19 @@ jobs:
               console.log('Available projects:', projects.map(p => `"${p.name}" (ID: ${p.id})`).join(', '));
               
               // Find the DevOps Release & QC Board project - try exact match first
-              // Project name from UI: "Dhwani - DevOps Release & QC Board"
+              // Project name from UI: "Dhwani – DevOps Release & QC Board" (with en-dash)
               let devopsProject = projects.find(p => {
                 const name = p.name.toLowerCase();
-                // Try exact match or close match
+                // Try exact match with various dash characters (hyphen, en-dash, em-dash)
                 return name === 'dhwani - devops release & qc board' ||
-                       name === 'dhwani – devops release & qc board' || // Different dash character
+                       name === 'dhwani – devops release & qc board' || // en-dash (U+2013)
+                       name === 'dhwani — devops release & qc board' || // em-dash (U+2014)
+                       name === 'dhwani - devops release and qc board' ||
+                       name === 'dhwani – devops release and qc board' ||
                        (name.includes('dhwani') && name.includes('devops') && name.includes('release') && name.includes('qc')) ||
+                       (name.includes('dhwani') && name.includes('devops') && name.includes('release') && name.includes('board')) ||
                        (name.includes('devops') && name.includes('release') && name.includes('qc')) ||
+                       (name.includes('devops') && name.includes('release') && name.includes('board')) ||
                        (name.includes('devops') && name.includes('release')) ||
                        (name.includes('devops') && name.includes('qc'));
               });
@@ -67,8 +74,13 @@ jobs:
               
               if (!devopsProject) {
                 console.log('❌ DevOps Release & QC Board project not found');
-                console.log('Available project names:', projects.map(p => p.name).join(', '));
-                console.log('Please check the project name matches: "DevOps", "Release", or "QC"');
+                console.log('Available project names:', projects.map(p => `"${p.name}"`).join(', '));
+                console.log('Searched for: "Dhwani – DevOps Release & QC Board" (with en-dash)');
+                console.log('Please check:');
+                console.log('  1. Project name matches: "DevOps", "Release", or "QC"');
+                console.log('  2. Project is in the dhwani-ris organization');
+                console.log('  3. GITHUB_TOKEN has organization project access');
+                console.log('  4. Consider using PROJECT_TOKEN secret with "project" scope');
                 return;
               }
               
@@ -90,31 +102,34 @@ jobs:
               const firstColumn = columns[0];
               console.log(`Adding PR to column: "${firstColumn.name}"`);
               
-              // Check if PR is already in the project
-              const { data: cards } = await github.rest.projects.listCards({
-                column_id: firstColumn.id
-              });
-              
-              const alreadyAdded = cards.some(card => 
-                card.content_url && card.content_url.includes(`/pulls/${prNumber}`)
-              );
-              
-              if (alreadyAdded) {
-                console.log(`✅ PR #${prNumber} is already in the project`);
-                return;
+              // Check if PR is already in the project (check all columns)
+              let alreadyAdded = false;
+              for (const column of columns) {
+                const { data: cards } = await github.rest.projects.listCards({
+                  column_id: column.id
+                });
+                alreadyAdded = cards.some(card => 
+                  card.content_url && card.content_url.includes(`/pulls/${prNumber}`)
+                );
+                if (alreadyAdded) {
+                  console.log(`✅ PR #${prNumber} is already in the project (column: ${column.name})`);
+                  break;
+                }
               }
               
-              // Add PR to the first column
-              await github.rest.projects.createCard({
-                column_id: firstColumn.id,
-                content_id: prNodeId,
-                content_type: 'PullRequest'
-              });
-              
-              console.log(`✅ Successfully added PR #${prNumber} to DevOps Release & QC Board`);
-              console.log(`   Project: "${devopsProject.name}"`);
-              console.log(`   Column: "${firstColumn.name}"`);
-              console.log(`   PR URL: ${prUrl}`);
+              if (!alreadyAdded) {
+                // Add PR to the first column
+                await github.rest.projects.createCard({
+                  column_id: firstColumn.id,
+                  content_id: prNodeId,
+                  content_type: 'PullRequest'
+                });
+                
+                console.log(`✅ Successfully added PR #${prNumber} to DevOps Release & QC Board`);
+                console.log(`   Project: "${devopsProject.name}"`);
+                console.log(`   Column: "${firstColumn.name}"`);
+                console.log(`   PR URL: ${prUrl}`);
+              }
             } catch (error) {
               console.log('❌ Error adding PR to project:', error.message);
               console.log('Error details:', JSON.stringify(error, null, 2));

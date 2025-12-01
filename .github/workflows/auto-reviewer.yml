@@ -3,7 +3,7 @@ name: Auto Request Review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, closed]
-    branches: [master]
+    branches: [main, master, develop, development]
 
 permissions:
   pull-requests: write
@@ -47,27 +47,46 @@ jobs:
               
               console.log('Current reviewers:', JSON.stringify(currentReviews, null, 2));
               
-              // Check if reviewer is already requested
-              const isAlreadyRequested = currentReviews.users?.some(
-                user => user.login.toLowerCase() === reviewer.toLowerCase()
-              ) || currentReviews.teams?.some(
-                team => team.slug.toLowerCase() === reviewer.toLowerCase()
+              // Check if DevOps team is already requested
+              const devopsTeam = 'dhwani-ris/dhwani-devops';
+              const isTeamRequested = currentReviews.teams?.some(
+                team => `${team.organization.login}/${team.slug}` === devopsTeam
               );
               
-              if (isAlreadyRequested) {
-                console.log(`✅ Review already requested from ${reviewer}`);
-                return;
+              // Check if individual reviewer is already requested
+              const isUserRequested = currentReviews.users?.some(
+                user => user.login.toLowerCase() === reviewer.toLowerCase()
+              );
+              
+              // Request review from DevOps team (from CODEOWNERS)
+              if (!isTeamRequested) {
+                try {
+                  await github.rest.pulls.requestReviewers({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: pr.number,
+                    team_reviewers: ['dhwani-devops'],
+                  });
+                  console.log(`✅ Successfully requested review from ${devopsTeam}`);
+                } catch (teamError) {
+                  console.log(`⚠️ Could not request review from team ${devopsTeam}:`, teamError.message);
+                }
+              } else {
+                console.log(`✅ Review already requested from ${devopsTeam}`);
               }
               
               // Request review from default reviewer
-              await github.rest.pulls.requestReviewers({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: pr.number,
-                reviewers: [reviewer],
-              });
-              
-              console.log(`✅ Successfully requested review from ${reviewer}`);
+              if (!isUserRequested) {
+                await github.rest.pulls.requestReviewers({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: pr.number,
+                  reviewers: [reviewer],
+                });
+                console.log(`✅ Successfully requested review from ${reviewer}`);
+              } else {
+                console.log(`✅ Review already requested from ${reviewer}`);
+              }
             } catch (error) {
               console.error(`❌ Error requesting review from ${reviewer}:`, error);
               console.error('Error details:', JSON.stringify(error, null, 2));
