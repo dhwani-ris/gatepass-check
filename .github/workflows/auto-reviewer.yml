@@ -14,8 +14,7 @@ jobs:
     name: Request Review from Default Reviewer
     runs-on: ubuntu-latest
     if: |
-      (github.event.action == 'opened' || github.event.action == 'reopened' || github.event.action == 'synchronize' || github.event.action == 'ready_for_review') &&
-      (github.event.pull_request.base.ref == 'main' || github.event.pull_request.base.ref == 'master')
+      (github.event.action == 'opened' || github.event.action == 'reopened' || github.event.action == 'synchronize' || github.event.action == 'ready_for_review')
     
     steps:
       - name: Request review from default reviewer
@@ -61,6 +60,7 @@ jobs:
               // Request review from DevOps team (from CODEOWNERS)
               if (!isTeamRequested) {
                 try {
+                  // Try with just team slug first
                   await github.rest.pulls.requestReviewers({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
@@ -70,6 +70,19 @@ jobs:
                   console.log(`✅ Successfully requested review from ${devopsTeam}`);
                 } catch (teamError) {
                   console.log(`⚠️ Could not request review from team ${devopsTeam}:`, teamError.message);
+                  console.log(`   Error details:`, JSON.stringify(teamError, null, 2));
+                  // Try alternative: get team ID and use GraphQL
+                  try {
+                    const { data: teams } = await github.rest.teams.list({
+                      org: 'dhwani-ris',
+                    });
+                    const devopsTeamData = teams.find(t => t.slug === 'dhwani-devops');
+                    if (devopsTeamData) {
+                      console.log(`   Found team ID: ${devopsTeamData.id}, trying alternative method...`);
+                    }
+                  } catch (e) {
+                    console.log(`   Could not fetch team info:`, e.message);
+                  }
                 }
               } else {
                 console.log(`✅ Review already requested from ${devopsTeam}`);

@@ -18,11 +18,12 @@ jobs:
       pull-requests: write
       repository-projects: write
       organization-projects: write
+      issues: read
     steps:
       - name: Add PR to DevOps Release Board
         uses: actions/github-script@v8
         with:
-          github-token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const prNodeId = context.payload.pull_request.node_id;
             const prNumber = context.payload.pull_request.number;
@@ -31,11 +32,44 @@ jobs:
             console.log(`Processing PR #${prNumber} (Node ID: ${prNodeId})`);
             
             try {
-              // Get organization projects
-              const { data: projects } = await github.rest.projects.listForOrg({
-                org: 'dhwani-ris',
-                state: 'open'
-              });
+              // Try GraphQL API first (more reliable for projects)
+              let projects = [];
+              try {
+                const graphqlQuery = `
+                  query {
+                    organization(login: "dhwani-ris") {
+                      projectsV2(first: 50, states: OPEN) {
+                        nodes {
+                          id
+                          title
+                          number
+                        }
+                      }
+                    }
+                  }
+                `;
+                const graphqlResponse = await github.graphql(graphqlQuery);
+                if (graphqlResponse?.organization?.projectsV2?.nodes) {
+                  projects = graphqlResponse.organization.projectsV2.nodes.map(p => ({
+                    id: p.id,
+                    name: p.title,
+                    number: p.number
+                  }));
+                  console.log(`Found ${projects.length} projects via GraphQL`);
+                }
+              } catch (graphqlError) {
+                console.log('GraphQL query failed, falling back to REST API:', graphqlError.message);
+              }
+              
+              // Fallback to REST API if GraphQL didn't work
+              if (projects.length === 0) {
+                const { data: restProjects } = await github.rest.projects.listForOrg({
+                  org: 'dhwani-ris',
+                  state: 'open'
+                });
+                projects = restProjects;
+                console.log(`Found ${projects.length} projects via REST API`);
+              }
               
               console.log(`Found ${projects.length} organization projects`);
               
@@ -76,74 +110,144 @@ jobs:
                 console.log('❌ DevOps Release & QC Board project not found');
                 console.log('Available project names:', projects.map(p => `"${p.name}"`).join(', '));
                 console.log('Searched for: "Dhwani – DevOps Release & QC Board" (with en-dash)');
-                console.log('Please check:');
-                console.log('  1. Project name matches: "DevOps", "Release", or "QC"');
-                console.log('  2. Project is in the dhwani-ris organization');
-                console.log('  3. GITHUB_TOKEN has organization project access');
-                console.log('  4. Consider using PROJECT_TOKEN secret with "project" scope');
                 return;
               }
               
               console.log(`✅ Found project: "${devopsProject.name}" (ID: ${devopsProject.id})`);
               
-              // Get project columns
-              const { data: columns } = await github.rest.projects.listColumns({
-                project_id: devopsProject.id
-              });
+              // Check if this is a Projects V2 (new) or Projects V1 (old)
+              const isV2Project = devopsProject.id && typeof devopsProject.id === 'string' && devopsProject.id.startsWith('PVT_');
               
-              if (columns.length === 0) {
-                console.log('❌ No columns found in project');
-                return;
-              }
-              
-              console.log(`Found ${columns.length} columns:`, columns.map(c => `"${c.name}"`).join(', '));
-              
-              // Find the first column (usually "To do", "In progress", or "Backlog")
-              const firstColumn = columns[0];
-              console.log(`Adding PR to column: "${firstColumn.name}"`);
-              
-              // Check if PR is already in the project (check all columns)
-              let alreadyAdded = false;
-              for (const column of columns) {
-                const { data: cards } = await github.rest.projects.listCards({
-                  column_id: column.id
-                });
-                alreadyAdded = cards.some(card => 
-                  card.content_url && card.content_url.includes(`/pulls/${prNumber}`)
-                );
-                if (alreadyAdded) {
-                  console.log(`✅ PR #${prNumber} is already in the project (column: ${column.name})`);
-                  break;
-                }
-              }
-              
-              if (!alreadyAdded) {
-                // Add PR to the first column
-                await github.rest.projects.createCard({
-                  column_id: firstColumn.id,
-                  content_id: prNodeId,
-                  content_type: 'PullRequest'
+              if (isV2Project) {
+                // Use GraphQL for Projects V2
+                console.log('Using Projects V2 (GraphQL)');
+                
+                // Get project fields/columns
+                const projectQuery = `
+                  query($projectId: ID!) {
+                    node(id: $projectId) {
+                      ... on ProjectV2 {
+                        id
+                        title
+                        fields(first: 20) {
+                          nodes {
+                            ... on ProjectV2Field {
+                              id
+                              name
+                            }
+                            ... on ProjectV2SingleSelectField {
+                              id
+                              name
+                              options {
+                                id
+                                name
+                              }
+                            }
+                          }
+                        }
+                        views(first: 10) {
+                          nodes {
+                            id
+                            name
+                          }
+                        }
+                      }
+                    }
+                  }
+                `;
+                
+                const projectData = await github.graphql(projectQuery, {
+                  projectId: devopsProject.id
                 });
                 
-                console.log(`✅ Successfully added PR #${prNumber} to DevOps Release & QC Board`);
-                console.log(`   Project: "${devopsProject.name}"`);
-                console.log(`   Column: "${firstColumn.name}"`);
-                console.log(`   PR URL: ${prUrl}`);
+                // Add item to project using GraphQL
+                const addItemMutation = `
+                  mutation($projectId: ID!, $contentId: ID!) {
+                    addProjectV2ItemById(input: {
+                      projectId: $projectId
+                      contentId: $contentId
+                    }) {
+                      item {
+                        id
+                      }
+                    }
+                  }
+                `;
+                
+                try {
+                  await github.graphql(addItemMutation, {
+                    projectId: devopsProject.id,
+                    contentId: prNodeId
+                  });
+                  console.log(`✅ Successfully added PR #${prNumber} to DevOps Release & QC Board (Projects V2)`);
+                  console.log(`   Project: "${devopsProject.name}"`);
+                  console.log(`   PR URL: ${prUrl}`);
+                } catch (addError) {
+                  if (addError.message && addError.message.includes('already exists')) {
+                    console.log(`✅ PR #${prNumber} is already in the project`);
+                  } else {
+                    throw addError;
+                  }
+                }
+              } else {
+                // Use REST API for Projects V1
+                console.log('Using Projects V1 (REST API)');
+                
+                // Get project columns
+                const { data: columns } = await github.rest.projects.listColumns({
+                  project_id: devopsProject.id
+                });
+                
+                if (columns.length === 0) {
+                  console.log('❌ No columns found in project');
+                  return;
+                }
+                
+                console.log(`Found ${columns.length} columns:`, columns.map(c => `"${c.name}"`).join(', '));
+                
+                // Find the first column (usually "To do", "In progress", or "Backlog")
+                const firstColumn = columns[0];
+                console.log(`Adding PR to column: "${firstColumn.name}"`);
+                
+                // Check if PR is already in the project (check all columns)
+                let alreadyAdded = false;
+                for (const column of columns) {
+                  const { data: cards } = await github.rest.projects.listCards({
+                    column_id: column.id
+                  });
+                  alreadyAdded = cards.some(card => 
+                    card.content_url && card.content_url.includes(`/pulls/${prNumber}`)
+                  );
+                  if (alreadyAdded) {
+                    console.log(`✅ PR #${prNumber} is already in the project (column: ${column.name})`);
+                    break;
+                  }
+                }
+                
+                if (!alreadyAdded) {
+                  // Add PR to the first column
+                  await github.rest.projects.createCard({
+                    column_id: firstColumn.id,
+                    content_id: prNodeId,
+                    content_type: 'PullRequest'
+                  });
+                  
+                  console.log(`✅ Successfully added PR #${prNumber} to DevOps Release & QC Board`);
+                  console.log(`   Project: "${devopsProject.name}"`);
+                  console.log(`   Column: "${firstColumn.name}"`);
+                  console.log(`   PR URL: ${prUrl}`);
+                }
               }
             } catch (error) {
               console.log('❌ Error adding PR to project:', error.message);
               console.log('Error details:', JSON.stringify(error, null, 2));
               
               if (error.status === 403) {
-                console.log('⚠️ Permission denied (403). GITHUB_TOKEN may not have organization project access.');
-                console.log('   Solution: Use a Personal Access Token (PAT) with "project" scope.');
-                console.log('   1. Create PAT at: https://github.com/settings/tokens');
-                console.log('   2. Add it as secret: PROJECT_TOKEN');
-                console.log('   3. Update workflow to use: ${{ secrets.PROJECT_TOKEN }}');
+                console.log('⚠️ Permission denied (403). Check repository permissions.');
               } else if (error.status === 404) {
-                console.log('⚠️ Not found (404). Check project name and permissions.');
+                console.log('⚠️ Not found (404). Check project name.');
               } else if (error.status === 401) {
-                console.log('⚠️ Unauthorized (401). Token may be invalid or expired.');
+                console.log('⚠️ Unauthorized (401). Check authentication.');
               }
               
               // Don't fail the workflow, just log the error
