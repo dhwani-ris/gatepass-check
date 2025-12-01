@@ -2,7 +2,8 @@ name: Auto Request Review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, closed]
+    branches: [main, master, develop, development]
 
 permissions:
   pull-requests: write
@@ -13,8 +14,7 @@ jobs:
     name: Request Review from Default Reviewer
     runs-on: ubuntu-latest
     if: |
-      github.event.pull_request.base.ref == 'main' || 
-      github.event.pull_request.base.ref == 'master'
+      (github.event.action == 'opened' || github.event.action == 'reopened' || github.event.action == 'synchronize' || github.event.action == 'ready_for_review')
     
     steps:
       - name: Request review from default reviewer
@@ -46,27 +46,81 @@ jobs:
               
               console.log('Current reviewers:', JSON.stringify(currentReviews, null, 2));
               
-              // Check if reviewer is already requested
-              const isAlreadyRequested = currentReviews.users?.some(
-                user => user.login.toLowerCase() === reviewer.toLowerCase()
-              ) || currentReviews.teams?.some(
-                team => team.slug.toLowerCase() === reviewer.toLowerCase()
+              // Check if DevOps team is already requested
+              const devopsTeam = 'dhwani-ris/dhwani-devops';
+              const isTeamRequested = currentReviews.teams?.some(
+                team => `${team.organization.login}/${team.slug}` === devopsTeam
               );
               
-              if (isAlreadyRequested) {
-                console.log(`✅ Review already requested from ${reviewer}`);
-                return;
+              // Check if individual reviewer is already requested
+              const isUserRequested = currentReviews.users?.some(
+                user => user.login.toLowerCase() === reviewer.toLowerCase()
+              );
+              
+              // Request review from DevOps team (from CODEOWNERS)
+              if (!isTeamRequested) {
+                try {
+                  // First, verify team exists
+                  const { data: teams } = await github.rest.teams.list({
+                    org: 'dhwani-ris',
+                  });
+                  console.log(`Available teams:`, teams.map(t => t.slug).join(', '));
+                  
+                  const devopsTeamData = teams.find(t => 
+                    t.slug === 'dhwani-devops' || 
+                    t.slug === 'devops' ||
+                    t.name.toLowerCase().includes('devops')
+                  );
+                  
+                  if (!devopsTeamData) {
+                    console.log(`⚠️ Team "dhwani-devops" not found in organization`);
+                    console.log(`   Available teams:`, teams.map(t => `${t.slug} (${t.name})`).join(', '));
+                  } else {
+                    console.log(`✅ Found team: ${devopsTeamData.slug} (ID: ${devopsTeamData.id})`);
+                    
+                    // Request review using team slug
+                    await github.rest.pulls.requestReviewers({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      pull_number: pr.number,
+                      team_reviewers: [devopsTeamData.slug],
+                    });
+                    console.log(`✅ Successfully requested review from ${devopsTeam}`);
+                  }
+                } catch (teamError) {
+                  console.log(`⚠️ Could not request review from team ${devopsTeam}:`, teamError.message);
+                  console.log(`   Error status:`, teamError.status);
+                  console.log(`   Error details:`, JSON.stringify(teamError, null, 2));
+                  
+                  // Try with just the slug as fallback
+                  try {
+                    await github.rest.pulls.requestReviewers({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      pull_number: pr.number,
+                      team_reviewers: ['dhwani-devops'],
+                    });
+                    console.log(`✅ Successfully requested review using fallback method`);
+                  } catch (fallbackError) {
+                    console.log(`❌ Fallback also failed:`, fallbackError.message);
+                  }
+                }
+              } else {
+                console.log(`✅ Review already requested from ${devopsTeam}`);
               }
               
               // Request review from default reviewer
-              await github.rest.pulls.requestReviewers({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: pr.number,
-                reviewers: [reviewer],
-              });
-              
-              console.log(`✅ Successfully requested review from ${reviewer}`);
+              if (!isUserRequested) {
+                await github.rest.pulls.requestReviewers({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: pr.number,
+                  reviewers: [reviewer],
+                });
+                console.log(`✅ Successfully requested review from ${reviewer}`);
+              } else {
+                console.log(`✅ Review already requested from ${reviewer}`);
+              }
             } catch (error) {
               console.error(`❌ Error requesting review from ${reviewer}:`, error);
               console.error('Error details:', JSON.stringify(error, null, 2));

@@ -82,6 +82,26 @@ jobs:
         with:
           python-version: '3.13'
       
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      
+      - name: Run OWASP Dependency-Check
+        uses: dependency-check/Dependency-Check_Action@main
+        id: depcheck
+        with:
+          project: 'gatepass-check'
+          path: '.'
+          format: 'JSON'
+          args: >
+            --enableRetired
+            --enableExperimental
+            --failOnCVSS 7
+            --out reports
+          token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+      
       - name: Run pip-audit
         run: |
           pip install pip-audit
@@ -102,6 +122,7 @@ jobs:
         with:
           name: security-reports-${{ github.run_id }}
           path: |
+            reports/dependency-check-report.json
             pip-audit-report.json
             safety-report.json
             bandit-report.json
@@ -118,6 +139,31 @@ jobs:
             
             let comment = '## 🔒 Security Scan Results\n\n';
             let hasIssues = false;
+            
+            // Check OWASP Dependency-Check
+            try {
+              if (fs.existsSync('reports/dependency-check-report.json')) {
+                const report = JSON.parse(fs.readFileSync('reports/dependency-check-report.json', 'utf8'));
+                if (report.dependencies && report.dependencies.length > 0) {
+                  const vulnerableDeps = report.dependencies.filter(dep => 
+                    dep.vulnerabilities && dep.vulnerabilities.length > 0
+                  );
+                  if (vulnerableDeps.length > 0) {
+                    hasIssues = true;
+                    comment += `### ⚠️ OWASP Dependency-Check Findings\n\n`;
+                    comment += `Found ${vulnerableDeps.length} vulnerable dependency(ies) with ${vulnerableDeps.reduce((sum, d) => sum + d.vulnerabilities.length, 0)} total vulnerability(ies).\n\n`;
+                    vulnerableDeps.slice(0, 10).forEach(dep => {
+                      const cves = dep.vulnerabilities.map(v => v.name).join(', ');
+                      const severity = dep.vulnerabilities.map(v => v.severity || 'UNKNOWN').join(', ');
+                      comment += `- **${dep.fileName || dep.packagePath}**: ${cves} (Severity: ${severity})\n`;
+                    });
+                    comment += `\n`;
+                  }
+                }
+              }
+            } catch (e) {
+              console.log('Error reading OWASP Dependency-Check report:', e);
+            }
             
             // Check pip-audit
             try {
@@ -208,7 +254,7 @@ jobs:
   security-summary:
     name: Security Summary
     runs-on: ubuntu-latest
-    needs: [codeql-analysis, secret-scanning, dependency-scanning]
+    needs: [codeql-analysis, secret-scanning, dependency-scanning, container-scanning]
     if: always()
     
     steps:
@@ -224,7 +270,9 @@ jobs:
             |-----------|--------|
             | CodeQL Analysis | ${needs.codeql-analysis.result === 'success' ? '✅ Passed' : needs.codeql-analysis.result === 'failure' ? '❌ Failed' : '⚠️ Skipped'} |
             | Secret Scanning | ${needs.secret-scanning.result === 'success' ? '✅ Passed' : needs.secret-scanning.result === 'failure' ? '❌ Failed' : '⚠️ Skipped'} |
-            | Dependency Scan | ${needs.dependency-scanning.result === 'success' ? '✅ Passed' : needs.dependency-scanning.result === 'failure' ? '❌ Failed' : '⚠️ Skipped'} |
+            | OWASP Dependency-Check | ${needs.dependency-scanning.result === 'success' ? '✅ Passed' : needs.dependency-scanning.result === 'failure' ? '❌ Failed' : '⚠️ Skipped'} |
+            | Dependency Scan (pip-audit/safety) | ${needs.dependency-scanning.result === 'success' ? '✅ Passed' : needs.dependency-scanning.result === 'failure' ? '❌ Failed' : '⚠️ Skipped'} |
+            | Container Scan (Trivy) | ${needs.container-scanning && needs.container-scanning.result === 'success' ? '✅ Passed' : needs.container-scanning && needs.container-scanning.result === 'failure' ? '❌ Failed' : '⚠️ Skipped'} |
             
             **View detailed results in the Security tab or workflow artifacts.**`;
             

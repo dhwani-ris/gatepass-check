@@ -137,22 +137,22 @@ jobs:
             const fixes = commits.filter(c => c.message.startsWith('fix')).map(c => c.message.replace(/^fix(\(.+?\))?:\s*/i, ''));
             const other = commits.filter(c => !c.message.startsWith('feat') && !c.message.startsWith('fix') && !c.message.startsWith('chore') && !c.message.startsWith('ci'));
             
-            // Build feature details
+            // Build feature details (without numbering - will be added in formatFeatureDetails)
             let featureDetails = [];
             if (features.length > 0) {
-              featureDetails.push(...features.map(f => `1) ${f}`));
+              featureDetails.push(...features);
             }
             if (fixes.length > 0) {
-              featureDetails.push(...fixes.map(f => `2) ${f}`));
+              featureDetails.push(...fixes);
             }
             if (other.length > 0) {
-              featureDetails.push(...other.slice(0, 5).map((o, i) => `${i + 3}) ${o.message}`));
+              featureDetails.push(...other.slice(0, 5).map(o => o.message));
             }
             
             const today = new Date().toISOString().split('T')[0];
             const releaseDate = today.split('-').reverse().join('-'); // Format: DD-MM-YYYY
             
-            // Format feature details better
+            // Format feature details with sequential numbering
             const formatFeatureDetails = (details) => {
               if (details.length === 0) return 'See commits above';
               return details.map((f, i) => `${i + 1}) ${f}`).join('<br>');
@@ -181,87 +181,6 @@ jobs:
             |-------|-----------------|----------------|-----------------|
             | 1. | \`${context.repo.repo}\` | \`${pr.base.ref}-release-${version}\` | ${formatFeatureDetails(featureDetails)} |
             
-            **Dependencies:**
-            - Dependencies updated: \`TBD\` *(Please review and update)*
-            \`\`\`
-            <!-- Review and update dependency changes if any -->
-            \`\`\`
-            
-            **Database Changes (Queries to run):**
-            - Database changes required: \`TBD\` *(Please review and update)*
-            \`\`\`
-            <!-- Review and add SQL queries or migration scripts if applicable -->
-            \`\`\`
-            
-            **Testing:**
-            - [ ] Unit tests passed
-            - [ ] Integration tests passed
-            - [ ] E2E tests passed
-            - [ ] Manual testing completed
-            \`\`\`
-            <!-- Add testing notes and results -->
-            \`\`\`
-            
-            **Known Issues:**
-            - Known issues: \`TBD\` *(Please review and update)*
-            \`\`\`
-            <!-- List any known issues or N/A -->
-            \`\`\`
-            
-            **Contact Information:**
-            - Support Team Email: \`\`\`<!-- email -->\`\`\`
-            - Support Team Phone: \`\`\`<!-- phone -->\`\`\`
-            
-            **Attachments:**
-            - Deployment files attached/committed: \`TBD\` *(Please review and update)*
-            \`\`\`
-            <!-- List attached files or N/A -->
-            \`\`\`
-            
-            ---
-            
-            ### For DevOps Team Use Only
-            *(To be filled by the DevOps team after deploying the release)*
-            
-            **Deployment Details:**
-            - Date and time of deployment: \`\`\`<!-- e.g., 23rd Jan 2025 [8:00PM] -->\`\`\`
-            - Deployed by: \`\`\`<!-- DevOps team member name -->\`\`\`
-            - Deployment Status: \`\`\`<!-- Successful / Failed / In Progress -->\`\`\`
-            
-            **Deployment Instructions:**
-            - [ ] Pre-deployment tasks completed (backups, etc.)
-            - [ ] Production environment accessed securely
-            - [ ] Latest release pulled from version control
-            - [ ] Dependencies installed/updated
-            - [ ] Database migrations run (if applicable)
-            - [ ] Application services restarted
-            - [ ] Deployment monitored and verified
-            
-            **Rollback Plan:**
-            - [ ] Rollback procedure documented
-            - [ ] Previous version tag identified: \`\`\`<!-- tag -->\`\`\`
-            - [ ] Database rollback scripts prepared (if applicable)
-            - [ ] Rollback tested in staging environment
-            
-            **Post-Deployment Checklist:**
-            - [ ] Service availability and response times verified
-            - [ ] System resources monitored
-            - [ ] Critical user scenarios tested
-            - [ ] Data integrity confirmed
-            - [ ] Error logs reviewed
-            - [ ] Security scans completed
-            - [ ] Server and infrastructure health checked
-            - [ ] Backup and disaster recovery procedures validated
-            
-            **Notes:**
-            \`\`\`
-            <!-- Add any additional deployment notes -->
-            \`\`\`
-            
-            **Acknowledgment:**
-            - [ ] Deployment acknowledged and system ready for production use
-            
-            ---
             **Note:** This deployment document was **automatically generated** from PR commits and information. Please review and update the TBD sections before merging.`;
             
             // Check if comment already exists
@@ -320,35 +239,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const pr = context.payload.pull_request;
-            const checklist = `## 🔧 DevOps Checklist - Workflow Review
-            
-            **Please review all workflows and checks before merging:**
-            
-            ### Workflow Status Review
-            - [ ] All CI/CD workflows are passing
-            - [ ] Quality Checks workflow passed
-            - [ ] Security Scan workflow passed
-            - [ ] Code quality checks passed
-            - [ ] Test coverage meets requirements
-            
-            ### Review Status
-            - [ ] All required reviewers have approved
-            - [ ] Code review completed
-            - [ ] Security review completed (if applicable)
-            
-            ### Pre-Merge Verification
-            - [ ] Deployment Notes document reviewed (see Deployment Notes comment above)
-            - [ ] All commits reviewed
-            - [ ] Breaking changes identified (if any)
-            - [ ] Version number verified (if applicable)
-            
-            ### Final Checks
-            - [ ] No blocking issues or errors
-            - [ ] Ready for production deployment
-            - [ ] Rollback plan understood (if high-risk)
-            
-            ---
-            **Note:** This checklist is for DevOps team to verify all workflows and checks before merging.`;
             
             // Check if comment already exists
             const comments = await github.rest.issues.listComments({
@@ -363,22 +253,44 @@ jobs:
             );
             
             if (existingComment) {
-              // Update existing comment
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existingComment.id,
-                body: checklist
-              });
-              console.log('Updated existing DevOps Checklist comment');
-            } else {
-              // Create new comment
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: pr.number,
-                body: checklist
-              });
-              console.log('Created new DevOps Checklist comment');
+              // Check if already submitted (check both visible marker and hidden marker)
+              if (existingComment.body.includes('✅ **CHECKLIST SUBMITTED**') || 
+                  existingComment.body.includes('CHECKLIST_SUBMITTED_LOCK')) {
+                console.log('Checklist already submitted and locked, cannot update');
+                return;
+              }
+              // Don't update existing comment to preserve checkbox states
+              console.log('DevOps Checklist comment already exists, preserving user checkboxes');
+              return;
             }
+            
+            // Only create new comment if it doesn't exist
+            const checklist = `## 🔧 DevOps Checklist
+            
+            👋 **DevOps Team:** Please review and check the items below.
+            
+            ---
+            
+            ### ✅ Pre-Merge Verification
+            - [ ] All CI/CD workflows passing (check Actions tab)
+            - [ ] Code quality checks passed (Semgrep, Pre-commit)
+            - [ ] Security scans passed (no vulnerabilities)
+            - [ ] No secrets or credentials exposed (manual review)
+            
+            ### 📝 Documentation
+            - [ ] Deployment notes reviewed (see comment above)
+            - [ ] 🔗 [Rollback Guidelines](https://dhwaniris1-my.sharepoint.com/:b:/g/personal/technology_dhwaniris_com/IQBZ-x3H8jIjQoliD_JEKHfSAQq2pMXdy8wFAdISg7fInTE?e=gd7dsq) reviewed
+            
+            ---
+            
+            💡 *Click the checkboxes above to mark items as complete.*`;
+            
+            // Create new comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              body: checklist
+            });
+            console.log('Created new DevOps Checklist comment');
 

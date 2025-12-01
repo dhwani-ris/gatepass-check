@@ -1,0 +1,294 @@
+name: Add PR to DevOps Board
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    branches: [main, master, develop, development]
+
+jobs:
+  add_to_project:
+    runs-on: ubuntu-latest
+    if: |
+      github.event.pull_request.base.ref == 'main' || 
+      github.event.pull_request.base.ref == 'master' ||
+      github.event.pull_request.base.ref == 'develop' ||
+      github.event.pull_request.base.ref == 'development'
+    permissions:
+      contents: read
+      pull-requests: write
+      repository-projects: write
+      organization-projects: write
+      issues: read
+    steps:
+      - name: Add PR to DevOps Release Board
+        uses: actions/github-script@v8
+        # Note: GITHUB_TOKEN is automatically provided by GitHub Actions
+        # No need to add it as a secret - it's available in all workflows
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNodeId = context.payload.pull_request.node_id;
+            const prNumber = context.payload.pull_request.number;
+            const prUrl = context.payload.pull_request.html_url;
+            
+            console.log(`Processing PR #${prNumber} (Node ID: ${prNodeId})`);
+            
+            try {
+              // Try GraphQL API first (more reliable for projects)
+              let projects = [];
+              try {
+                const graphqlQuery = `
+                  query {
+                    organization(login: "dhwani-ris") {
+                      projectsV2(first: 50, states: OPEN) {
+                        nodes {
+                          id
+                          title
+                          number
+                        }
+                      }
+                    }
+                  }
+                `;
+                const graphqlResponse = await github.graphql(graphqlQuery);
+                if (graphqlResponse?.organization?.projectsV2?.nodes) {
+                  projects = graphqlResponse.organization.projectsV2.nodes.map(p => ({
+                    id: p.id,
+                    name: p.title,
+                    number: p.number
+                  }));
+                  console.log(`Found ${projects.length} projects via GraphQL`);
+                }
+              } catch (graphqlError) {
+                console.log('GraphQL query failed, falling back to REST API:', graphqlError.message);
+              }
+              
+              // Fallback to REST API if GraphQL didn't work
+              if (projects.length === 0) {
+                const { data: restProjects } = await github.rest.projects.listForOrg({
+                  org: 'dhwani-ris',
+                  state: 'open'
+                });
+                projects = restProjects;
+                console.log(`Found ${projects.length} projects via REST API`);
+              }
+              
+              console.log(`Found ${projects.length} organization projects`);
+              
+              if (projects.length === 0) {
+                console.log('⚠️ No organization projects found. Check permissions.');
+                return;
+              }
+              
+              // Log all project names for debugging
+              console.log('Available projects:', projects.map(p => `"${p.name}" (ID: ${p.id})`).join(', '));
+              
+              // Find the DevOps Release & QC Board project - try exact match first
+              // Project name from UI: "Dhwani – DevOps Release & QC Board" (with en-dash)
+              let devopsProject = null;
+              
+              // Try multiple matching strategies
+              const searchTerms = [
+                'dhwani - devops release & qc board',
+                'dhwani – devops release & qc board', // en-dash (U+2013)
+                'dhwani — devops release & qc board', // em-dash (U+2014)
+                'dhwani - devops release and qc board',
+                'dhwani – devops release and qc board',
+                'dhwani devops release qc board',
+                'devops release qc board'
+              ];
+              
+              for (const term of searchTerms) {
+                devopsProject = projects.find(p => 
+                  p.name.toLowerCase().trim() === term
+                );
+                if (devopsProject) {
+                  console.log(`✅ Found exact match: "${devopsProject.name}"`);
+                  break;
+                }
+              }
+              
+              // If no exact match, try partial matches
+              if (!devopsProject) {
+                devopsProject = projects.find(p => {
+                  const name = p.name.toLowerCase();
+                  return (name.includes('dhwani') && name.includes('devops') && name.includes('release') && name.includes('qc')) ||
+                         (name.includes('dhwani') && name.includes('devops') && name.includes('release') && name.includes('board')) ||
+                         (name.includes('devops') && name.includes('release') && name.includes('qc')) ||
+                         (name.includes('devops') && name.includes('release') && name.includes('board'));
+                });
+                if (devopsProject) {
+                  console.log(`✅ Found partial match: "${devopsProject.name}"`);
+                }
+              }
+              
+              // If still not found, try just "devops" and "release"
+              if (!devopsProject) {
+                devopsProject = projects.find(p => {
+                  const name = p.name.toLowerCase();
+                  return (name.includes('devops') && name.includes('release')) ||
+                         (name.includes('devops') && name.includes('qc'));
+                });
+                if (devopsProject) {
+                  console.log(`✅ Found loose match: "${devopsProject.name}"`);
+                }
+              }
+              
+              // Last resort: any project with "devops"
+              if (!devopsProject) {
+                devopsProject = projects.find(p => 
+                  p.name.toLowerCase().includes('devops')
+                );
+                if (devopsProject) {
+                  console.log(`✅ Found devops project: "${devopsProject.name}"`);
+                }
+              }
+              
+              if (!devopsProject) {
+                console.log('❌ DevOps Release & QC Board project not found');
+                console.log('Available project names:', projects.map(p => `"${p.name}"`).join(', '));
+                console.log('Searched for: "Dhwani – DevOps Release & QC Board" (with en-dash)');
+                return;
+              }
+              
+              console.log(`✅ Found project: "${devopsProject.name}" (ID: ${devopsProject.id})`);
+              
+              // Check if this is a Projects V2 (new) or Projects V1 (old)
+              const isV2Project = devopsProject.id && typeof devopsProject.id === 'string' && devopsProject.id.startsWith('PVT_');
+              
+              if (isV2Project) {
+                // Use GraphQL for Projects V2
+                console.log('Using Projects V2 (GraphQL)');
+                
+                // Get project fields/columns
+                const projectQuery = `
+                  query($projectId: ID!) {
+                    node(id: $projectId) {
+                      ... on ProjectV2 {
+                        id
+                        title
+                        fields(first: 20) {
+                          nodes {
+                            ... on ProjectV2Field {
+                              id
+                              name
+                            }
+                            ... on ProjectV2SingleSelectField {
+                              id
+                              name
+                              options {
+                                id
+                                name
+                              }
+                            }
+                          }
+                        }
+                        views(first: 10) {
+                          nodes {
+                            id
+                            name
+                          }
+                        }
+                      }
+                    }
+                  }
+                `;
+                
+                const projectData = await github.graphql(projectQuery, {
+                  projectId: devopsProject.id
+                });
+                
+                // Add item to project using GraphQL
+                const addItemMutation = `
+                  mutation($projectId: ID!, $contentId: ID!) {
+                    addProjectV2ItemById(input: {
+                      projectId: $projectId
+                      contentId: $contentId
+                    }) {
+                      item {
+                        id
+                      }
+                    }
+                  }
+                `;
+                
+                try {
+                  await github.graphql(addItemMutation, {
+                    projectId: devopsProject.id,
+                    contentId: prNodeId
+                  });
+                  console.log(`✅ Successfully added PR #${prNumber} to DevOps Release & QC Board (Projects V2)`);
+                  console.log(`   Project: "${devopsProject.name}"`);
+                  console.log(`   PR URL: ${prUrl}`);
+                } catch (addError) {
+                  if (addError.message && addError.message.includes('already exists')) {
+                    console.log(`✅ PR #${prNumber} is already in the project`);
+                  } else {
+                    throw addError;
+                  }
+                }
+              } else {
+                // Use REST API for Projects V1
+                console.log('Using Projects V1 (REST API)');
+                
+                // Get project columns
+                const { data: columns } = await github.rest.projects.listColumns({
+                  project_id: devopsProject.id
+                });
+                
+                if (columns.length === 0) {
+                  console.log('❌ No columns found in project');
+                  return;
+                }
+                
+                console.log(`Found ${columns.length} columns:`, columns.map(c => `"${c.name}"`).join(', '));
+                
+                // Find the first column (usually "To do", "In progress", or "Backlog")
+                const firstColumn = columns[0];
+                console.log(`Adding PR to column: "${firstColumn.name}"`);
+                
+                // Check if PR is already in the project (check all columns)
+                let alreadyAdded = false;
+                for (const column of columns) {
+                  const { data: cards } = await github.rest.projects.listCards({
+                    column_id: column.id
+                  });
+                  alreadyAdded = cards.some(card => 
+                    card.content_url && card.content_url.includes(`/pulls/${prNumber}`)
+                  );
+                  if (alreadyAdded) {
+                    console.log(`✅ PR #${prNumber} is already in the project (column: ${column.name})`);
+                    break;
+                  }
+                }
+                
+                if (!alreadyAdded) {
+                  // Add PR to the first column
+                  await github.rest.projects.createCard({
+                    column_id: firstColumn.id,
+                    content_id: prNodeId,
+                    content_type: 'PullRequest'
+                  });
+                  
+                  console.log(`✅ Successfully added PR #${prNumber} to DevOps Release & QC Board`);
+                  console.log(`   Project: "${devopsProject.name}"`);
+                  console.log(`   Column: "${firstColumn.name}"`);
+                  console.log(`   PR URL: ${prUrl}`);
+                }
+              }
+            } catch (error) {
+              console.log('❌ Error adding PR to project:', error.message);
+              console.log('Error details:', JSON.stringify(error, null, 2));
+              
+              if (error.status === 403) {
+                console.log('⚠️ Permission denied (403). Check repository permissions.');
+              } else if (error.status === 404) {
+                console.log('⚠️ Not found (404). Check project name.');
+              } else if (error.status === 401) {
+                console.log('⚠️ Unauthorized (401). Check authentication.');
+              }
+              
+              // Don't fail the workflow, just log the error
+              console.log('⚠️ Continuing workflow despite error...');
+            }
+

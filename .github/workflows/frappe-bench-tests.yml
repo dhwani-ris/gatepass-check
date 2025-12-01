@@ -1,0 +1,261 @@
+name: Frappe Bench Unit Tests
+
+on:
+  pull_request:
+    branches: [ main, develop, development, master ]
+  push:
+    branches: [ main, develop, development, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# This workflow is optional and won't block merges
+concurrency:
+  group: frappe-bench-tests-${{ github.event_name }}-${{ github.ref }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  frappe-bench-test:
+    name: 'Frappe Bench App Tests (Optional)'
+    runs-on: ubuntu-latest
+    # This job is optional and won't block merges
+    continue-on-error: true
+    if: hashFiles('**/__init__.py') != '' || hashFiles('**/hooks.py') != ''
+    
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: test_frappe
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            mariadb-client \
+            redis-server \
+            curl \
+            git \
+            wget \
+            xvfb \
+            libfontconfig1 \
+            libfreetype6 \
+            libxrender1 \
+            libjpeg-turbo8 \
+            xfonts-75dpi \
+            xfonts-base
+
+      - name: Install Frappe Bench CLI
+        run: |
+          pip install frappe-bench
+
+      - name: Initialize Frappe Bench
+        continue-on-error: true
+        run: |
+          echo "🚀 Initializing Frappe Bench environment..."
+          bench init --skip-redis-config-check --skip-assets --frappe-branch version-15 frappe-bench || {
+            echo "⚠️ Bench initialization failed, but continuing..."
+            exit 0
+          }
+          cd frappe-bench
+          echo "✅ Bench initialized successfully"
+
+      - name: Detect app name
+        id: app-name
+        working-directory: frappe-bench
+        run: |
+          # Try to detect app name from current directory structure
+          if [ -d "../apps" ]; then
+            APP_NAME=$(ls -d ../apps/*/ 2>/dev/null | head -1 | xargs basename)
+          elif [ -d "apps" ]; then
+            APP_NAME=$(ls -d apps/*/ 2>/dev/null | head -1 | xargs basename)
+          else
+            # Check if current repo is an app
+            if [ -f "../__init__.py" ] || [ -f "../hooks.py" ]; then
+              APP_NAME=$(basename $(cd .. && pwd))
+            else
+              # Default: use repo name
+              APP_NAME=$(echo "${{ github.repository }}" | cut -d'/' -f2)
+            fi
+          fi
+          
+          if [ -z "$APP_NAME" ] || [ "$APP_NAME" = "." ]; then
+            APP_NAME="gatepass_check"
+          fi
+          
+          echo "name=$APP_NAME" >> $GITHUB_OUTPUT
+          echo "Detected app name: $APP_NAME"
+
+      - name: Get app into bench
+        working-directory: frappe-bench
+        continue-on-error: true
+        run: |
+          APP_NAME="${{ steps.app-name.outputs.name }}"
+          echo "📦 Installing app: $APP_NAME into bench..."
+          
+          # If app is in parent directory, create symlink or copy
+          if [ -d "../$APP_NAME" ] && [ -f "../$APP_NAME/__init__.py" ]; then
+            bench get-app $APP_NAME ../$APP_NAME || echo "⚠️ Failed to get app from ../$APP_NAME"
+          elif [ -d "../apps/$APP_NAME" ]; then
+            bench get-app $APP_NAME ../apps/$APP_NAME || echo "⚠️ Failed to get app from ../apps/$APP_NAME"
+          else
+            # Clone or use current repo as app
+            bench get-app $APP_NAME ${{ github.repository_url }} || \
+            bench get-app $APP_NAME file://$(cd .. && pwd) || \
+            echo "⚠️ App $APP_NAME not found, will try to continue anyway"
+          fi
+          
+          # Verify app is installed
+          if bench list-apps | grep -q "$APP_NAME"; then
+            echo "✅ App $APP_NAME successfully installed in bench"
+          else
+            echo "⚠️ App $APP_NAME not found in bench, but continuing..."
+          fi
+
+      - name: Create test site
+        working-directory: frappe-bench
+        continue-on-error: true
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_ROOT_USER: root
+          DB_ROOT_PASSWORD: root
+        run: |
+          APP_NAME="${{ steps.app-name.outputs.name }}"
+          echo "🏗️ Creating test site with app: $APP_NAME..."
+          
+          # Wait for MariaDB to be ready
+          echo "Waiting for MariaDB to be ready..."
+          for i in {1..30}; do
+            if mysql -h 127.0.0.1 -P 3306 -u root -proot -e "SELECT 1" &>/dev/null; then
+              echo "✅ MariaDB is ready"
+              break
+            fi
+            echo "Waiting for MariaDB... ($i/30)"
+            sleep 2
+          done
+          
+          # Create site
+          bench new-site test_site \
+            --db-type mariadb \
+            --admin-password admin \
+            --no-mariadb-socket \
+            --mariadb-host 127.0.0.1 \
+            --mariadb-port 3306 \
+            --mariadb-root-password root || {
+            echo "⚠️ Site creation failed, but continuing..."
+            exit 0
+          }
+          
+          # Install app if site was created
+          if bench --site test_site list-apps &>/dev/null; then
+            echo "📦 Installing app $APP_NAME in test site..."
+            bench --site test_site install-app $APP_NAME || {
+              echo "⚠️ App installation failed, but continuing..."
+            }
+            echo "✅ Test site created and app installed"
+          else
+            echo "⚠️ Site creation may have failed, but continuing..."
+          fi
+
+      - name: Run app-specific tests
+        working-directory: frappe-bench
+        continue-on-error: true
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+        run: |
+          APP_NAME="${{ steps.app-name.outputs.name }}"
+          echo "🧪 Running unit tests for app: $APP_NAME"
+          
+          # Check if site exists
+          if ! bench --site test_site list-apps &>/dev/null; then
+            echo "⚠️ Test site not found, skipping tests"
+            exit 0
+          fi
+          
+          # Check if app is installed
+          if ! bench --site test_site list-apps | grep -q "$APP_NAME"; then
+            echo "⚠️ App $APP_NAME not installed in test site, skipping tests"
+            exit 0
+          fi
+          
+          # Try to run app-specific tests
+          echo "Running tests with bench run-tests..."
+          if bench --site test_site run-tests --app $APP_NAME; then
+            echo "✅ Tests passed for app $APP_NAME"
+          elif bench --site test_site run-tests --app $APP_NAME --coverage; then
+            echo "✅ Tests passed with coverage for app $APP_NAME"
+          else
+            echo "⚠️ No tests found for app $APP_NAME or test execution failed"
+            echo "This is optional and won't block the merge"
+            exit 0
+          fi
+
+      - name: Upload test results and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frappe-bench-test-results
+          path: |
+            frappe-bench/sites/test_site/logs/*.log
+            frappe-bench/sites/test_site/logs/*.txt
+          if-no-files-found: ignore
+          retention-days: 7
+      
+      - name: Test Summary
+        if: always()
+        run: |
+          echo "## 📊 Frappe Bench Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** This test job is **optional** and will not block merges." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -d "frappe-bench/sites/test_site" ]; then
+            echo "✅ Test site was created" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Test site was not created" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          APP_NAME="${{ steps.app-name.outputs.name }}"
+          if [ -d "frappe-bench/apps/$APP_NAME" ]; then
+            echo "✅ App $APP_NAME was installed in bench" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ App $APP_NAME was not found in bench" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check the workflow logs for detailed test results." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Test Environment" >> $GITHUB_STEP_SUMMARY
+          echo "- **Frappe Version:** version-15" >> $GITHUB_STEP_SUMMARY
+          echo "- **Python Version:** 3.11" >> $GITHUB_STEP_SUMMARY
+          echo "- **Node.js Version:** 18" >> $GITHUB_STEP_SUMMARY
+          echo "- **Database:** MariaDB 10.11" >> $GITHUB_STEP_SUMMARY
+

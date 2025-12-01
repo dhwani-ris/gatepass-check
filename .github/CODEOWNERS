@@ -1,0 +1,14 @@
+# CODEOWNERS file
+# This file defines code owners for the repository
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# DevOps team owns all files
+* @dhwani-ris/dhwani-devops
+
+# GitHub workflows - DevOps team
+/.github/workflows/ @dhwani-ris/dhwani-devops
+
+# Configuration files - DevOps team
+/.github/ @dhwani-ris/dhwani-devops
+/.releaserc @dhwani-ris/dhwani-devops
+
