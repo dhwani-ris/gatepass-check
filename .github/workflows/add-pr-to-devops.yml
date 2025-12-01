@@ -2,7 +2,7 @@ name: Add PR to DevOps Board
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize]
+    types: [opened, reopened, synchronize, ready_for_review]
     branches: [main, master, develop, development]
 
 jobs:
@@ -85,27 +85,63 @@ jobs:
               
               // Find the DevOps Release & QC Board project - try exact match first
               // Project name from UI: "Dhwani – DevOps Release & QC Board" (with en-dash)
-              let devopsProject = projects.find(p => {
-                const name = p.name.toLowerCase();
-                // Try exact match with various dash characters (hyphen, en-dash, em-dash)
-                return name === 'dhwani - devops release & qc board' ||
-                       name === 'dhwani – devops release & qc board' || // en-dash (U+2013)
-                       name === 'dhwani — devops release & qc board' || // em-dash (U+2014)
-                       name === 'dhwani - devops release and qc board' ||
-                       name === 'dhwani – devops release and qc board' ||
-                       (name.includes('dhwani') && name.includes('devops') && name.includes('release') && name.includes('qc')) ||
-                       (name.includes('dhwani') && name.includes('devops') && name.includes('release') && name.includes('board')) ||
-                       (name.includes('devops') && name.includes('release') && name.includes('qc')) ||
-                       (name.includes('devops') && name.includes('release') && name.includes('board')) ||
-                       (name.includes('devops') && name.includes('release')) ||
-                       (name.includes('devops') && name.includes('qc'));
-              });
+              let devopsProject = null;
               
-              // If not found, try just "devops"
+              // Try multiple matching strategies
+              const searchTerms = [
+                'dhwani - devops release & qc board',
+                'dhwani – devops release & qc board', // en-dash (U+2013)
+                'dhwani — devops release & qc board', // em-dash (U+2014)
+                'dhwani - devops release and qc board',
+                'dhwani – devops release and qc board',
+                'dhwani devops release qc board',
+                'devops release qc board'
+              ];
+              
+              for (const term of searchTerms) {
+                devopsProject = projects.find(p => 
+                  p.name.toLowerCase().trim() === term
+                );
+                if (devopsProject) {
+                  console.log(`✅ Found exact match: "${devopsProject.name}"`);
+                  break;
+                }
+              }
+              
+              // If no exact match, try partial matches
+              if (!devopsProject) {
+                devopsProject = projects.find(p => {
+                  const name = p.name.toLowerCase();
+                  return (name.includes('dhwani') && name.includes('devops') && name.includes('release') && name.includes('qc')) ||
+                         (name.includes('dhwani') && name.includes('devops') && name.includes('release') && name.includes('board')) ||
+                         (name.includes('devops') && name.includes('release') && name.includes('qc')) ||
+                         (name.includes('devops') && name.includes('release') && name.includes('board'));
+                });
+                if (devopsProject) {
+                  console.log(`✅ Found partial match: "${devopsProject.name}"`);
+                }
+              }
+              
+              // If still not found, try just "devops" and "release"
+              if (!devopsProject) {
+                devopsProject = projects.find(p => {
+                  const name = p.name.toLowerCase();
+                  return (name.includes('devops') && name.includes('release')) ||
+                         (name.includes('devops') && name.includes('qc'));
+                });
+                if (devopsProject) {
+                  console.log(`✅ Found loose match: "${devopsProject.name}"`);
+                }
+              }
+              
+              // Last resort: any project with "devops"
               if (!devopsProject) {
                 devopsProject = projects.find(p => 
                   p.name.toLowerCase().includes('devops')
                 );
+                if (devopsProject) {
+                  console.log(`✅ Found devops project: "${devopsProject.name}"`);
+                }
               }
               
               if (!devopsProject) {

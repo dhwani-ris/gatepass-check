@@ -60,28 +60,49 @@ jobs:
               // Request review from DevOps team (from CODEOWNERS)
               if (!isTeamRequested) {
                 try {
-                  // Try with just team slug first
-                  await github.rest.pulls.requestReviewers({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    pull_number: pr.number,
-                    team_reviewers: ['dhwani-devops'],
+                  // First, verify team exists
+                  const { data: teams } = await github.rest.teams.list({
+                    org: 'dhwani-ris',
                   });
-                  console.log(`✅ Successfully requested review from ${devopsTeam}`);
+                  console.log(`Available teams:`, teams.map(t => t.slug).join(', '));
+                  
+                  const devopsTeamData = teams.find(t => 
+                    t.slug === 'dhwani-devops' || 
+                    t.slug === 'devops' ||
+                    t.name.toLowerCase().includes('devops')
+                  );
+                  
+                  if (!devopsTeamData) {
+                    console.log(`⚠️ Team "dhwani-devops" not found in organization`);
+                    console.log(`   Available teams:`, teams.map(t => `${t.slug} (${t.name})`).join(', '));
+                  } else {
+                    console.log(`✅ Found team: ${devopsTeamData.slug} (ID: ${devopsTeamData.id})`);
+                    
+                    // Request review using team slug
+                    await github.rest.pulls.requestReviewers({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      pull_number: pr.number,
+                      team_reviewers: [devopsTeamData.slug],
+                    });
+                    console.log(`✅ Successfully requested review from ${devopsTeam}`);
+                  }
                 } catch (teamError) {
                   console.log(`⚠️ Could not request review from team ${devopsTeam}:`, teamError.message);
+                  console.log(`   Error status:`, teamError.status);
                   console.log(`   Error details:`, JSON.stringify(teamError, null, 2));
-                  // Try alternative: get team ID and use GraphQL
+                  
+                  // Try with just the slug as fallback
                   try {
-                    const { data: teams } = await github.rest.teams.list({
-                      org: 'dhwani-ris',
+                    await github.rest.pulls.requestReviewers({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      pull_number: pr.number,
+                      team_reviewers: ['dhwani-devops'],
                     });
-                    const devopsTeamData = teams.find(t => t.slug === 'dhwani-devops');
-                    if (devopsTeamData) {
-                      console.log(`   Found team ID: ${devopsTeamData.id}, trying alternative method...`);
-                    }
-                  } catch (e) {
-                    console.log(`   Could not fetch team info:`, e.message);
+                    console.log(`✅ Successfully requested review using fallback method`);
+                  } catch (fallbackError) {
+                    console.log(`❌ Fallback also failed:`, fallbackError.message);
                   }
                 }
               } else {
